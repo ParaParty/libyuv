@@ -79,8 +79,8 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Build the set of objects that do not need to be compiled with flags to enable
 # particular architecture features.
-add_library( ${ly_lib_name}_common_objects OBJECT ${ly_common_source_files} )
-set(ly_lib_parts $<TARGET_OBJECTS:${ly_lib_name}_common_objects>)
+add_library( ${ly_lib_name}_common_objects STATIC ${ly_common_source_files} )
+set(ly_lib_parts ${ly_lib_name}_common_objects)
 
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" SYSPROC)
 set(LOONGARCH64_ALIASES loongarch64)
@@ -96,30 +96,31 @@ if(NOT MSVC)
   if(arch_lowercase MATCHES "^arm" AND NOT arch_lowercase STREQUAL "arm64")
     # Enable Arm Neon kernels.
     add_definitions(-DLIBYUV_NEON=1)
-    add_library(${ly_lib_name}_neon OBJECT
+    add_library(${ly_lib_name}_neon STATIC
       ${ly_src_dir}/compare_neon.cc
       ${ly_src_dir}/rotate_neon.cc
       ${ly_src_dir}/row_neon.cc
       ${ly_src_dir}/scale_neon.cc)
     target_compile_options(${ly_lib_name}_neon PRIVATE -mfpu=neon)
-    list(APPEND ly_lib_parts $<TARGET_OBJECTS:${ly_lib_name}_neon>)
+    list(APPEND ly_lib_parts ${ly_lib_name}_neon)
   endif()
 
   if(arch_lowercase STREQUAL "aarch64" OR arch_lowercase STREQUAL "arm64")
     # Enable AArch64 Neon dot-product and i8mm kernels.
-    add_library(${ly_lib_name}_neon64 OBJECT
+    add_library(${ly_lib_name}_neon64 STATIC
       ${ly_src_dir}/compare_neon64.cc
       ${ly_src_dir}/rotate_neon64.cc
       ${ly_src_dir}/row_neon64.cc
       ${ly_src_dir}/scale_neon64.cc)
     target_compile_options(${ly_lib_name}_neon64 PRIVATE -march=armv8.2-a+dotprod+i8mm)
     list(APPEND ly_lib_parts $<TARGET_OBJECTS:${ly_lib_name}_neon64>)
+    list(APPEND ly_lib_parts ${ly_lib_name}_neon64)
 
     # Enable AArch64 SVE kernels.
-    add_library(${ly_lib_name}_sve OBJECT
+    add_library(${ly_lib_name}_sve STATIC
       ${ly_src_dir}/row_sve.cc)
     target_compile_options(${ly_lib_name}_sve PRIVATE -march=armv8.5-a+i8mm+sve2)
-    list(APPEND ly_lib_parts $<TARGET_OBJECTS:${ly_lib_name}_sve>)
+    list(APPEND ly_lib_parts ${ly_lib_name}_sve)
 
     set(OLD_CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS})
     set(OLD_CMAKE_TRY_COMPILE_TARGET_TYPE ${CMAKE_TRY_COMPILE_TARGET_TYPE})
@@ -136,12 +137,12 @@ int main(void) { return 0; }
 
     if (CAN_COMPILE_SME)
       # Enable AArch64 SME kernels.
-      add_library(${ly_lib_name}_sme OBJECT
+      add_library(${ly_lib_name}_sme STATIC
         ${ly_src_dir}/rotate_sme.cc
         ${ly_src_dir}/row_sme.cc
         ${ly_src_dir}/scale_sme.cc)
       target_compile_options(${ly_lib_name}_sme PRIVATE -march=armv9-a+sme)
-      list(APPEND ly_lib_parts $<TARGET_OBJECTS:${ly_lib_name}_sme>)
+      list(APPEND ly_lib_parts ${ly_lib_name}_sme)
     else()
       add_definitions(-DLIBYUV_DISABLE_SME)
     endif()
@@ -174,10 +175,12 @@ if(LOONGARCH64)
 endif()
 
 # this creates the static library (.a)
-add_library( ${ly_lib_static} STATIC ${ly_lib_parts})
+add_library( ${ly_lib_static} STATIC stub.cc)
+target_link_libraries(${ly_lib_static} PUBLIC ${ly_lib_parts})
 
 # this creates the shared library (.so)
-add_library( ${ly_lib_shared} SHARED ${ly_lib_parts})
+add_library( ${ly_lib_shared} SHARED stub.cc)
+target_link_libraries( ${ly_lib_shared} PUBLIC ${ly_lib_parts})
 set_target_properties( ${ly_lib_shared} PROPERTIES OUTPUT_NAME "${ly_lib_name}" )
 set_target_properties( ${ly_lib_shared} PROPERTIES PREFIX "lib" )
 if(WIN32)
@@ -195,13 +198,6 @@ target_link_libraries	( yuvconvert ${ly_lib_static} )
 # this creates the yuvconstants tool
 add_executable      ( yuvconstants ${ly_base_dir}/util/yuvconstants.c )
 target_link_libraries  ( yuvconstants ${ly_lib_static} )
-
-find_package ( JPEG )
-if (JPEG_FOUND)
-  include_directories( ${JPEG_INCLUDE_DIR} )
-  target_link_libraries( ${ly_lib_shared} ${JPEG_LIBRARY} )
-  add_definitions( -DHAVE_JPEG )
-endif()
 
 if(UNIT_TEST)
   find_library(GTEST_LIBRARY gtest)
